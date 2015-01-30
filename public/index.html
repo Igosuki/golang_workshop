@@ -1,0 +1,107 @@
+<html>
+  <head>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.3.11/angular.js"></script>
+    <script type="text/javascript">
+      angular.module("chat", [])
+      angular.controller("ChatController", function($scope, chat) {
+        $scope.messages = chat.store()
+      });
+      angular.constant('chatConfig', {
+        purgeDelay: 60000,
+        serviceAddr: "wss://localhost:8080/ws",
+        retryTimer: 5000,
+        level: "debug"
+      });
+      angular.service("chat", function($q, $location, $timeout, alertsConfig) {
+        var ChatService;
+        return new (ChatService = (function() {
+          var createConn, levels, purgeStoreLoop, service, startWorker, store, storeMessage;
+
+          store = [];
+
+          store.unseen = 0;
+
+          levels = ["debug", "error", "fatal", "info", "warning", "trace", "off"];
+
+          storeMessage = function(message) {
+            store.push(message);
+            return message;
+          };
+
+          createConn = function() {
+            var conn;
+            conn = new WebSocket(alertsConfig.serviceAddr);
+            conn.onmessage = function(e) {
+              return storeMessage(JSON.parse(e.data));
+            };
+            conn.onerror = function(e) {
+              return console.error("Websocket error at %s", e.target.URL);
+            };
+            conn.onclose = function(e) {
+              console.log("Server at %s closed the connection", alertsConfig.serviceAddr);
+              if (alertsConfig.retryTimer > 0) {
+                return $timeout(createConn, alertsConfig.retryTimer);
+              }
+            };
+            return conn;
+          };
+
+          service = createConn();
+
+          purgeStoreLoop = function() {
+            return $timeout(function() {
+              var currentTime;
+              currentTime = new Date();
+              return angular.forEach(store, function(msg, i) {
+                if (msg.ttl > 0 && msg.expiry < currentTime) {
+                  return store.splice(i, 1);
+                }
+              });
+            }, alertsConfig.purgeDelay);
+          };
+
+          startWorker = function() {
+            return purgeStoreLoop()["finally"](purgeStoreLoop);
+          };
+
+          function ChatService() {
+            startWorker();
+            return;
+          }
+
+          ChatService.prototype.push = function(level, message, ttl) {
+            message = {
+              level: level,
+              msg: message,
+              target: {
+                type: "event"
+              },
+              utime: new Date(),
+              ttl: ttl,
+              expiry: new Date(new Date() + ttl),
+              seen: false,
+              read: false,
+              namespace: "generic"
+            };
+            storeMessage(message);
+            if (service.readyState !== WebSocket.CLOSED && levels.indexOf(message.level) > levels.indexOf(alertsConfig.level)) {
+              return service.send(JSON.stringify(message));
+            }
+          };
+
+          ChatService.prototype.store = function() {
+            return store;
+          };
+
+          return ChatService;
+
+        })());
+      });
+
+    </script>
+  </head>
+  <body ng-app="chat", ng-controller="ChatController">
+    <p data-ng-repeat="msg in messages"
+    <textarea id="message-input" class="with-emoji-menu" maxlength="" aria-label="Message input for Direct message with slackbot" autocorrect="off" autocomplete="off" spellcheck="true" style="overflow-y: hidden; height: 38px;"></textarea>
+  </body>
+</html>
